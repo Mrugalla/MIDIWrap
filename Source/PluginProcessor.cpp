@@ -114,7 +114,9 @@ MIDIWrapAudioProcessor::MIDIWrapAudioProcessor()
 	apvts(*this, nullptr, "PARAMETERS", createParameterLayout()),
 	lowerLimitParam(apvts.getParameter("lowerLimit")),
 	upperLimitParam(apvts.getParameter("upperLimit")),
-    midiBufferOut()
+    midiBufferOut(),
+	lowerLimit(0),
+	upperLimit(127)
 #endif
 {
     midiBufferOut.ensureSize(1024);
@@ -226,14 +228,25 @@ void MIDIWrapAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
 
     auto& range = lowerLimitParam->getNormalisableRange();
 
-    const auto lowerLimit = static_cast<int>(std::round(range.convertFrom0to1(lowerLimitParam->getValue())));
-    const auto upperLimit = static_cast<int>(std::round(range.convertFrom0to1(upperLimitParam->getValue())));
+    const auto nLowerLimit = static_cast<int>(std::round(range.convertFrom0to1(lowerLimitParam->getValue())));
+    const auto nUpperLimit = static_cast<int>(std::round(range.convertFrom0to1(upperLimitParam->getValue())));
+	
+	midiBufferOut.clear();
 
-    midiBufferOut.clear();
-
+	if (lowerLimit != nLowerLimit || upperLimit != nUpperLimit)
+	{
+		lowerLimit = nLowerLimit;
+		upperLimit = nUpperLimit;
+		
+		// all notes off
+		for (auto ch = 1; ch <= 16; ++ch)
+			for (auto note = 0; note < 128; ++note)
+				midiBufferOut.addEvent(juce::MidiMessage::noteOff(ch, note), 0);
+	}
+	
 	for (auto midiMessage : midiMessages)
 	{
-        auto msg = midiMessage.getMessage();
+		auto msg = midiMessage.getMessage();
 		const auto sampleNumber = midiMessage.samplePosition;
 
 		if (msg.isNoteOn())
@@ -245,7 +258,7 @@ void MIDIWrapAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
 		}
 		else if (msg.isNoteOff())
 		{
-            const auto noteNumber = wrap(midiMessage.getMessage().getNoteNumber(), lowerLimit, upperLimit);
+			const auto noteNumber = wrap(midiMessage.getMessage().getNoteNumber(), lowerLimit, upperLimit);
 			msg = juce::MidiMessage::noteOff(msg.getChannel(), noteNumber, msg.getVelocity());
 
 			midiBufferOut.addEvent(msg, sampleNumber);
